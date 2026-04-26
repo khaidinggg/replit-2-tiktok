@@ -21,11 +21,9 @@ function buildTikTokVideoUrl(url: string): string {
     const parsed = new URL(url);
     if (parsed.hostname.includes("tiktok.com")) {
       const videoIdMatch = parsed.pathname.match(/\/video\/(\d+)/);
-      if (videoIdMatch) {
-        const authorMatch = parsed.pathname.match(/\/@([^/]+)/);
-        if (authorMatch) {
-          return `https://www.tiktok.com/@${authorMatch[1]}/video/${videoIdMatch[1]}`;
-        }
+      const authorMatch = parsed.pathname.match(/\/@([^/]+)/);
+      if (videoIdMatch && authorMatch) {
+        return `https://www.tiktok.com/@${authorMatch[1]}/video/${videoIdMatch[1]}`;
       }
     }
     return url;
@@ -47,13 +45,83 @@ async function fetchOembed(videoUrl: string): Promise<OembedData | null> {
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
       },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(6000),
     });
     if (!res.ok) return null;
     return await res.json() as OembedData;
   } catch {
     return null;
   }
+}
+
+type BraveWebResult = {
+  url: string;
+  title: string;
+  description?: string;
+  thumbnail?: { src?: string; original?: string };
+  profile?: { name?: string; long_name?: string };
+  age?: string;
+  extra_snippets?: string[];
+  page_age?: string;
+};
+
+async function braveSearch(query: string, apiKey: string, offset = 0): Promise<BraveWebResult[]> {
+  try {
+    const url = new URL("https://api.search.brave.com/res/v1/web/search");
+    url.searchParams.set("q", query);
+    url.searchParams.set("count", "20");
+    url.searchParams.set("offset", String(offset));
+    url.searchParams.set("result_filter", "web");
+    url.searchParams.set("safesearch", "off");
+
+    const res = await fetch(url.toString(), {
+      headers: {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": apiKey,
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!res.ok) return [];
+    const data = await res.json() as { web?: { results?: BraveWebResult[] } };
+    return data.web?.results ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function extractVideoItems(results: BraveWebResult[]) {
+  return results
+    .filter(item => item.url.includes("tiktok.com") && /\/video\/(\d+)/.test(item.url))
+    .map(item => {
+      const videoIdMatch = item.url.match(/\/video\/(\d+)/);
+      const videoId = videoIdMatch![1];
+      const videoUrl = buildTikTokVideoUrl(item.url);
+      const authorMatch = item.url.match(/\/@([^/]+)/);
+      const authorUsername = authorMatch ? authorMatch[1] : "unknown";
+
+      let likes: number | null = null;
+      if (item.extra_snippets) {
+        for (const snippet of item.extra_snippets) {
+          const likeMatch = snippet.match(/([\d.,]+[kmb]?)\s*likes?/i);
+          if (likeMatch) { likes = parseViewCount(likeMatch[1]); break; }
+        }
+      }
+
+      const postedAt = item.page_age ?? item.age ?? null;
+
+      return {
+        videoId,
+        videoUrl,
+        title: item.title,
+        authorUsername,
+        description: item.description ?? null,
+        likes,
+        postedAt,
+        braveThumb: item.thumbnail?.src ?? "",
+      };
+    });
 }
 
 router.get("/tiktok/thumbnail", async (req, res): Promise<void> => {
@@ -93,6 +161,7 @@ router.get("/tiktok/search", async (req, res): Promise<void> => {
   }
 
   const { q, count } = queryParsed.data;
+  const desiredCount = Math.min(count ?? 20, 40);
 
   const apiKey = process.env.BRAVE_API_KEY;
   if (!apiKey) {
@@ -102,84 +171,30 @@ router.get("/tiktok/search", async (req, res): Promise<void> => {
   }
 
   try {
-    const searchQuery = `${q} tiktok video`;
-    const desiredCount = Math.min(count ?? 20, 20);
+    req.log.info({ query: q, count: desiredCount }, "Searching TikTok via Brave (multi-query)");
 
-    const url = new URL("https://api.search.brave.com/res/v1/web/search");
-    url.searchParams.set("q", searchQuery);
-    url.searchParams.set("count", "20");
-    url.searchParams.set("result_filter", "web");
-    url.searchParams.set("safesearch", "off");
+    const searchVariants = [
+      `${q} tiktok video`,
+      `${q} tiktok viral`,
+      `tiktok ${q}`,
+    ];
 
-    req.log.info({ query: q, count: desiredCount }, "Searching TikTok via Brave");
+    const allRawResults = await Promise.all(
+      searchVariants.map(variant => braveSearch(variant, apiKey))
+    );
 
-    const response = await fetch(url.toString(), {
-      headers: {
-        "Accept": "application/json",
-        "Accept-Encoding": "gzip",
-        "X-Subscription-Token": apiKey,
-      },
+    const allItems = allRawResults.flatMap(r => extractVideoItems(r));
+
+    const seen = new Set<string>();
+    const uniqueItems = allItems.filter(item => {
+      if (seen.has(item.videoId)) return false;
+      seen.add(item.videoId);
+      return true;
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      req.log.error({ status: response.status, body: errText }, "Brave API error");
-      res.status(500).json({ error: `Search API error: ${response.status}` });
-      return;
-    }
+    req.log.info({ total: uniqueItems.length }, "Unique TikTok videos found");
 
-    const data = await response.json() as {
-      web?: {
-        results?: Array<{
-          url: string;
-          title: string;
-          description?: string;
-          thumbnail?: { src?: string; original?: string };
-          profile?: { name?: string; long_name?: string };
-          age?: string;
-          extra_snippets?: string[];
-          page_age?: string;
-        }>;
-      };
-    };
-
-    const rawItems = (data.web?.results ?? []).filter(item => {
-      if (!item.url.includes("tiktok.com")) return false;
-      return item.url.match(/\/video\/(\d+)/);
-    });
-
-    const videoItems = rawItems.map(item => {
-      const videoIdMatch = item.url.match(/\/video\/(\d+)/);
-      const videoId = videoIdMatch![1];
-      const videoUrl = buildTikTokVideoUrl(item.url);
-      const authorMatch = item.url.match(/\/@([^/]+)/);
-      const authorUsername = authorMatch ? authorMatch[1] : "unknown";
-
-      let likes: number | null = null;
-      if (item.extra_snippets) {
-        for (const snippet of item.extra_snippets) {
-          const likeMatch = snippet.match(/([\d.,]+[kmb]?)\s*likes?/i);
-          if (likeMatch) { likes = parseViewCount(likeMatch[1]); break; }
-        }
-      }
-
-      let postedAt: string | null = null;
-      if (item.page_age) postedAt = item.page_age;
-      else if (item.age) postedAt = item.age;
-
-      return {
-        videoId,
-        videoUrl,
-        title: item.title,
-        authorUsername,
-        description: item.description ?? null,
-        likes,
-        postedAt,
-        braveThumb: item.thumbnail?.src ?? "",
-      };
-    });
-
-    const slicedItems = videoItems.slice(0, desiredCount);
+    const slicedItems = uniqueItems.slice(0, desiredCount);
 
     const oembedResults = await Promise.all(
       slicedItems.map(item => fetchOembed(item.videoUrl))

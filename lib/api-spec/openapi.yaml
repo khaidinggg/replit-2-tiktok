@@ -45,7 +45,7 @@ paths:
           schema:
             type: integer
             default: 20
-          description: Number of results to return
+          description: Number of results to return (max 40)
       responses:
         "200":
           description: Search results
