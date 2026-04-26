@@ -8,6 +8,11 @@ interface VideoCardProps {
   video: TikTokVideo;
 }
 
+function getThumbnailUrl(url: string): string {
+  if (!url) return "";
+  return `/api/tiktok/thumbnail?url=${encodeURIComponent(url)}`;
+}
+
 export function VideoCard({ video }: VideoCardProps) {
   const [imgError, setImgError] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -29,9 +34,9 @@ export function VideoCard({ video }: VideoCardProps) {
         rel="noopener noreferrer"
         className="relative block aspect-[9/16] w-full bg-muted/30 overflow-hidden"
       >
-        {!imgError ? (
+        {!imgError && video.thumbnail ? (
           <img 
-            src={video.thumbnail} 
+            src={getThumbnailUrl(video.thumbnail)} 
             alt={video.title} 
             onError={() => setImgError(true)}
             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
