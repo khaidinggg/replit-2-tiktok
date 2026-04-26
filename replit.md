@@ -25,3 +25,18 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - `pnpm --filter @workspace/api-server run dev` — run API server locally
 
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
+
+## Artifacts
+
+### TikTok Search (`artifacts/tiktok-search`)
+- **Preview path**: `/`
+- **Purpose**: Clean, distraction-free TikTok video search (no recommendations, no history)
+- **Stack**: React + Vite + TailwindCSS, dark theme
+- **Search**: Uses Brave Search API (`BRAVE_API_KEY` env var) to find TikTok videos
+- **Features**: Video thumbnails, view/like counts, post date, one-click copy link button
+
+### API Server (`artifacts/api-server`)
+- **Preview path**: `/api`
+- **Routes**:
+  - `GET /api/healthz` — health check
+  - `GET /api/tiktok/search?q=...&count=...` — TikTok video search via Brave API

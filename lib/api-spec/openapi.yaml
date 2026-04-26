@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: tiktok
+    description: TikTok search operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /tiktok/search:
+    get:
+      operationId: searchTikTok
+      tags: [tiktok]
+      summary: Search TikTok videos
+      description: Search for TikTok videos using the Brave Search API
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search query
+        - name: count
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+          description: Number of results to return
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TikTokSearchResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +74,63 @@ components:
           type: string
       required:
         - status
-
+    TikTokVideo:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        thumbnail:
+          type: string
+        videoUrl:
+          type: string
+        author:
+          type: string
+        authorUsername:
+          type: string
+        views:
+          type: ["integer", "null"]
+        likes:
+          type: ["integer", "null"]
+        saves:
+          type: ["integer", "null"]
+        comments:
+          type: ["integer", "null"]
+        shares:
+          type: ["integer", "null"]
+        postedAt:
+          type: ["string", "null"]
+        duration:
+          type: ["string", "null"]
+        description:
+          type: ["string", "null"]
+      required:
+        - id
+        - title
+        - thumbnail
+        - videoUrl
+        - author
+        - authorUsername
+    TikTokSearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/TikTokVideo"
+        query:
+          type: string
+        total:
+          type: integer
+      required:
+        - results
+        - query
+        - total
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error

@@ -14,3 +14,40 @@ import * as zod from "zod";
 export const HealthCheckResponse = zod.object({
   status: zod.string(),
 });
+
+/**
+ * Search for TikTok videos using the Brave Search API
+ * @summary Search TikTok videos
+ */
+export const searchTikTokQueryCountDefault = 20;
+
+export const SearchTikTokQueryParams = zod.object({
+  q: zod.coerce.string().describe("Search query"),
+  count: zod.coerce
+    .number()
+    .default(searchTikTokQueryCountDefault)
+    .describe("Number of results to return"),
+});
+
+export const SearchTikTokResponse = zod.object({
+  results: zod.array(
+    zod.object({
+      id: zod.string(),
+      title: zod.string(),
+      thumbnail: zod.string(),
+      videoUrl: zod.string(),
+      author: zod.string(),
+      authorUsername: zod.string(),
+      views: zod.number().nullish(),
+      likes: zod.number().nullish(),
+      saves: zod.number().nullish(),
+      comments: zod.number().nullish(),
+      shares: zod.number().nullish(),
+      postedAt: zod.string().nullish(),
+      duration: zod.string().nullish(),
+      description: zod.string().nullish(),
+    }),
+  ),
+  query: zod.string(),
+  total: zod.number(),
+});

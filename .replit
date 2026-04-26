@@ -18,3 +18,16 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[userenv]
+
+[userenv.shared]
+BRAVE_API_KEY = "BSAjK73eoX8oXxhHtnI1cmQNa0TIte4"
+
+[[ports]]
+localPort = 8080
+externalPort = 80
+
+[[ports]]
+localPort = 25981
+externalPort = 3000

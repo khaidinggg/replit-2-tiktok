@@ -13,7 +13,12 @@ import type {
   UseQueryResult,
 } from "@tanstack/react-query";
 
-import type { HealthStatus } from "./api.schemas";
+import type {
+  ErrorResponse,
+  HealthStatus,
+  SearchTikTokParams,
+  TikTokSearchResponse,
+} from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
 import type { ErrorType } from "../custom-fetch";
@@ -92,6 +97,101 @@ export function useHealthCheck<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getHealthCheckQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Search for TikTok videos using the Brave Search API
+ * @summary Search TikTok videos
+ */
+export const getSearchTikTokUrl = (params: SearchTikTokParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/tiktok/search?${stringifiedParams}`
+    : `/api/tiktok/search`;
+};
+
+export const searchTikTok = async (
+  params: SearchTikTokParams,
+  options?: RequestInit,
+): Promise<TikTokSearchResponse> => {
+  return customFetch<TikTokSearchResponse>(getSearchTikTokUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getSearchTikTokQueryKey = (params?: SearchTikTokParams) => {
+  return [`/api/tiktok/search`, ...(params ? [params] : [])] as const;
+};
+
+export const getSearchTikTokQueryOptions = <
+  TData = Awaited<ReturnType<typeof searchTikTok>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params: SearchTikTokParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof searchTikTok>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getSearchTikTokQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof searchTikTok>>> = ({
+    signal,
+  }) => searchTikTok(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof searchTikTok>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type SearchTikTokQueryResult = NonNullable<
+  Awaited<ReturnType<typeof searchTikTok>>
+>;
+export type SearchTikTokQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Search TikTok videos
+ */
+
+export function useSearchTikTok<
+  TData = Awaited<ReturnType<typeof searchTikTok>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params: SearchTikTokParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof searchTikTok>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getSearchTikTokQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

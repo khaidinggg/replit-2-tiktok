@@ -5,9 +5,6 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-export interface HealthStatus {
-  status: string;
-}
 
 export interface TikTokVideo {
   id: string;
@@ -33,24 +30,3 @@ export interface TikTokVideo {
   /** @nullable */
   description?: string | null;
 }
-
-export interface TikTokSearchResponse {
-  results: TikTokVideo[];
-  query: string;
-  total: number;
-}
-
-export interface ErrorResponse {
-  error: string;
-}
-
-export type SearchTikTokParams = {
-  /**
-   * Search query
-   */
-  q: string;
-  /**
-   * Number of results to return
-   */
-  count?: number;
-};
