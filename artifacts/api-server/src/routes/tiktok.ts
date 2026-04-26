@@ -61,14 +61,13 @@ router.get("/tiktok/search", async (req, res): Promise<void> => {
   }
 
   try {
-    const searchQuery = `site:tiktok.com/@ ${q}`;
+    const searchQuery = `${q} tiktok video`;
     const countToFetch = Math.min(count ?? 20, 20);
 
     const url = new URL("https://api.search.brave.com/res/v1/web/search");
     url.searchParams.set("q", searchQuery);
     url.searchParams.set("count", String(countToFetch));
     url.searchParams.set("result_filter", "web");
-    url.searchParams.set("freshness", "");
     url.searchParams.set("safesearch", "off");
 
     req.log.info({ query: q, count: countToFetch }, "Searching TikTok via Brave");
