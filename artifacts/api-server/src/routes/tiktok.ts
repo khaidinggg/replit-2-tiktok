@@ -16,26 +16,63 @@ function parseViewCount(text: string | undefined): number | null {
   return Math.round(num);
 }
 
-function buildTikTokVideoUrl(url: string): string {
+function buildTikTokVideoUrl(username: string, videoId: string): string {
+  return `https://www.tiktok.com/@${username}/video/${videoId}`;
+}
+
+interface RapidApiVideo {
+  video_id: string;
+  aweme_id?: string;
+  title?: string;
+  play_count?: number;
+  digg_count?: number;
+  comment_count?: number;
+  share_count?: number;
+  download_count?: number;
+  create_time?: number;
+  cover?: string;
+  origin_cover?: string;
+  author?: {
+    unique_id?: string;
+    nickname?: string;
+  };
+}
+
+async function searchViaRapidApi(
+  query: string,
+  count: number,
+  apiKey: string,
+): Promise<RapidApiVideo[]> {
   try {
-    const parsed = new URL(url);
-    if (parsed.hostname.includes("tiktok.com")) {
-      const videoIdMatch = parsed.pathname.match(/\/video\/(\d+)/);
-      const authorMatch = parsed.pathname.match(/\/@([^/]+)/);
-      if (videoIdMatch && authorMatch) {
-        return `https://www.tiktok.com/@${authorMatch[1]}/video/${videoIdMatch[1]}`;
-      }
-    }
-    return url;
+    const url = new URL("https://tiktok-scraper7.p.rapidapi.com/feed/search");
+    url.searchParams.set("keywords", query);
+    url.searchParams.set("count", String(Math.min(count, 20)));
+    url.searchParams.set("cursor", "0");
+    url.searchParams.set("region", "US");
+    url.searchParams.set("publish_time", "0");
+    url.searchParams.set("sort_type", "0");
+
+    const res = await fetch(url.toString(), {
+      headers: {
+        "x-rapidapi-host": "tiktok-scraper7.p.rapidapi.com",
+        "x-rapidapi-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!res.ok) return [];
+    const data = await res.json() as { code?: number; data?: { videos?: RapidApiVideo[] } };
+    if (data.code !== 0) return [];
+    return data.data?.videos ?? [];
   } catch {
-    return url;
+    return [];
   }
 }
 
 interface OembedData {
   thumbnail_url?: string;
   author_name?: string;
-  title?: string;
 }
 
 async function fetchOembed(videoUrl: string): Promise<OembedData | null> {
@@ -45,7 +82,7 @@ async function fetchOembed(videoUrl: string): Promise<OembedData | null> {
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
       },
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) return null;
     return await res.json() as OembedData;
@@ -58,19 +95,17 @@ type BraveWebResult = {
   url: string;
   title: string;
   description?: string;
-  thumbnail?: { src?: string; original?: string };
-  profile?: { name?: string; long_name?: string };
+  thumbnail?: { src?: string };
   age?: string;
   extra_snippets?: string[];
   page_age?: string;
 };
 
-async function braveSearch(query: string, apiKey: string, offset = 0): Promise<BraveWebResult[]> {
+async function braveSearch(query: string, apiKey: string): Promise<BraveWebResult[]> {
   try {
     const url = new URL("https://api.search.brave.com/res/v1/web/search");
     url.searchParams.set("q", query);
     url.searchParams.set("count", "20");
-    url.searchParams.set("offset", String(offset));
     url.searchParams.set("result_filter", "web");
     url.searchParams.set("safesearch", "off");
 
@@ -89,39 +124,6 @@ async function braveSearch(query: string, apiKey: string, offset = 0): Promise<B
   } catch {
     return [];
   }
-}
-
-function extractVideoItems(results: BraveWebResult[]) {
-  return results
-    .filter(item => item.url.includes("tiktok.com") && /\/video\/(\d+)/.test(item.url))
-    .map(item => {
-      const videoIdMatch = item.url.match(/\/video\/(\d+)/);
-      const videoId = videoIdMatch![1];
-      const videoUrl = buildTikTokVideoUrl(item.url);
-      const authorMatch = item.url.match(/\/@([^/]+)/);
-      const authorUsername = authorMatch ? authorMatch[1] : "unknown";
-
-      let likes: number | null = null;
-      if (item.extra_snippets) {
-        for (const snippet of item.extra_snippets) {
-          const likeMatch = snippet.match(/([\d.,]+[kmb]?)\s*likes?/i);
-          if (likeMatch) { likes = parseViewCount(likeMatch[1]); break; }
-        }
-      }
-
-      const postedAt = item.page_age ?? item.age ?? null;
-
-      return {
-        videoId,
-        videoUrl,
-        title: item.title,
-        authorUsername,
-        description: item.description ?? null,
-        likes,
-        postedAt,
-        braveThumb: item.thumbnail?.src ?? "",
-      };
-    });
 }
 
 router.get("/tiktok/thumbnail", async (req, res): Promise<void> => {
@@ -161,17 +163,68 @@ router.get("/tiktok/search", async (req, res): Promise<void> => {
   }
 
   const { q, count } = queryParsed.data;
-  const desiredCount = Math.min(count ?? 20, 40);
+  const desiredCount = Math.min(count ?? 20, 20);
 
-  const apiKey = process.env.BRAVE_API_KEY;
-  if (!apiKey) {
-    req.log.error("BRAVE_API_KEY not configured");
-    res.status(500).json({ error: "Search API key not configured" });
-    return;
-  }
+  const rapidApiKey = process.env.RAPIDAPI_KEY;
+  const braveApiKey = process.env.BRAVE_API_KEY;
 
   try {
-    req.log.info({ query: q, count: desiredCount }, "Searching TikTok via Brave (multi-query)");
+    // --- Primary: RapidAPI TikTok Scraper ---
+    if (rapidApiKey) {
+      req.log.info({ query: q, count: desiredCount }, "Searching TikTok via RapidAPI");
+
+      const videos = await searchViaRapidApi(q, desiredCount, rapidApiKey);
+
+      if (videos.length > 0) {
+        const results = videos.slice(0, desiredCount).map(v => {
+          const username = v.author?.unique_id ?? "unknown";
+          const videoId = v.video_id;
+          const videoUrl = buildTikTokVideoUrl(username, videoId);
+          const thumbnail = v.origin_cover ?? v.cover ?? "";
+          const postedAt = v.create_time
+            ? new Date(v.create_time * 1000).toISOString()
+            : null;
+
+          return {
+            id: videoId,
+            title: v.title ?? "",
+            thumbnail,
+            videoUrl,
+            author: v.author?.nickname ?? username,
+            authorUsername: username,
+            views: v.play_count ?? null,
+            likes: v.digg_count ?? null,
+            saves: null as number | null,
+            comments: v.comment_count ?? null,
+            shares: v.share_count ?? null,
+            postedAt,
+            duration: null as string | null,
+            description: v.title ?? null,
+          };
+        });
+
+        req.log.info({ total: results.length }, "RapidAPI results found");
+
+        const parsed = SearchTikTokResponse.parse({
+          results,
+          query: q,
+          total: results.length,
+        });
+
+        res.json(parsed);
+        return;
+      }
+
+      req.log.warn("RapidAPI returned no results, falling back to Brave");
+    }
+
+    // --- Fallback: Brave Search ---
+    if (!braveApiKey) {
+      res.status(500).json({ error: "No search API key configured" });
+      return;
+    }
+
+    req.log.info({ query: q }, "Searching TikTok via Brave (fallback)");
 
     const searchVariants = [
       `${q} tiktok video`,
@@ -179,38 +232,69 @@ router.get("/tiktok/search", async (req, res): Promise<void> => {
       `tiktok ${q}`,
     ];
 
-    const allRawResults = await Promise.all(
-      searchVariants.map(variant => braveSearch(variant, apiKey))
+    const allRaw = await Promise.all(
+      searchVariants.map(v => braveSearch(v, braveApiKey))
     );
-
-    const allItems = allRawResults.flatMap(r => extractVideoItems(r));
 
     const seen = new Set<string>();
-    const uniqueItems = allItems.filter(item => {
-      if (seen.has(item.videoId)) return false;
-      seen.add(item.videoId);
-      return true;
-    });
+    const uniqueItems: Array<{
+      videoId: string;
+      videoUrl: string;
+      title: string;
+      authorUsername: string;
+      description: string | null;
+      likes: number | null;
+      postedAt: string | null;
+      braveThumb: string;
+    }> = [];
 
-    req.log.info({ total: uniqueItems.length }, "Unique TikTok videos found");
+    for (const results of allRaw) {
+      for (const item of results) {
+        if (!item.url.includes("tiktok.com")) continue;
+        const videoIdMatch = item.url.match(/\/video\/(\d+)/);
+        if (!videoIdMatch) continue;
+        const videoId = videoIdMatch[1];
+        if (seen.has(videoId)) continue;
+        seen.add(videoId);
 
-    const slicedItems = uniqueItems.slice(0, desiredCount);
+        const authorMatch = item.url.match(/\/@([^/]+)/);
+        const authorUsername = authorMatch ? authorMatch[1] : "unknown";
+
+        let likes: number | null = null;
+        if (item.extra_snippets) {
+          for (const snippet of item.extra_snippets) {
+            const m = snippet.match(/([\d.,]+[kmb]?)\s*likes?/i);
+            if (m) { likes = parseViewCount(m[1]); break; }
+          }
+        }
+
+        uniqueItems.push({
+          videoId,
+          videoUrl: `https://www.tiktok.com/@${authorUsername}/video/${videoId}`,
+          title: item.title,
+          authorUsername,
+          description: item.description ?? null,
+          likes,
+          postedAt: item.page_age ?? item.age ?? null,
+          braveThumb: item.thumbnail?.src ?? "",
+        });
+      }
+    }
+
+    const sliced = uniqueItems.slice(0, desiredCount);
 
     const oembedResults = await Promise.all(
-      slicedItems.map(item => fetchOembed(item.videoUrl))
+      sliced.map(item => fetchOembed(item.videoUrl))
     );
 
-    const results = slicedItems.map((item, i) => {
+    const results = sliced.map((item, i) => {
       const oembed = oembedResults[i];
-      const thumbnail = oembed?.thumbnail_url ?? item.braveThumb ?? "";
-      const author = oembed?.author_name ?? item.authorUsername;
-
       return {
         id: item.videoId,
         title: item.title,
-        thumbnail,
+        thumbnail: oembed?.thumbnail_url ?? item.braveThumb ?? "",
         videoUrl: item.videoUrl,
-        author,
+        author: oembed?.author_name ?? item.authorUsername,
         authorUsername: item.authorUsername,
         views: null as number | null,
         likes: item.likes,

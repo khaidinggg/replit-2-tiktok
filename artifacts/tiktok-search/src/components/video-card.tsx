@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link2, Play, Heart, Bookmark, Eye, Check } from "lucide-react";
+import { Link2, Play, Heart, MessageCircle, Eye, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatNumber, formatDate } from "@/lib/format";
 import type { TikTokVideo } from "@workspace/api-client-react";
@@ -98,8 +98,8 @@ export function VideoCard({ video }: VideoCardProps) {
             <span className="text-xs font-medium text-muted-foreground">{formatNumber(video.likes)}</span>
           </div>
           <div className="flex flex-col items-center justify-center gap-1">
-            <Bookmark className="w-4 h-4 text-muted-foreground" />
-            <span className="text-xs font-medium text-muted-foreground">{formatNumber(video.saves)}</span>
+            <MessageCircle className="w-4 h-4 text-muted-foreground" />
+            <span className="text-xs font-medium text-muted-foreground">{formatNumber(video.comments)}</span>
           </div>
         </div>
 
